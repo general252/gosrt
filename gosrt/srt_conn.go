@@ -1,8 +1,9 @@
 package gosrt
 
 import (
-	"github.com/pion/transport/packetio"
 	"log"
+
+	"github.com/pion/transport/packetio"
 )
 
 type SRTConn struct {

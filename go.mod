@@ -1,4 +1,4 @@
-module github.com/general252/gst
+module github.com/general252/gosrt
 
 go 1.18
 

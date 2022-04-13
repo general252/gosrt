@@ -1,9 +1,10 @@
 package main
 
 import (
-	"github.com/general252/gst/gosrt"
 	"log"
 	"os"
+
+	"github.com/general252/gosrt/gosrt"
 )
 
 func init() {
