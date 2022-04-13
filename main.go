@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/general252/gst/gosrt"
 	"log"
+	"os"
 )
 
 func init() {
@@ -10,16 +11,40 @@ func init() {
 }
 
 func main() {
-	log.Println("hello")
+	lis, err := gosrt.Listen(8855)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 
-	r := gosrt.Startup()
-	log.Println("Startup: ", r)
+	for {
+		conn, err := lis.AcceptSRT()
+		if err != nil {
+			log.Println(err)
+			continue
+		}
 
-	defer gosrt.Clean()
+		log.Println("accepted ", conn.SID())
 
-	r = gosrt.Listen(8855)
-	log.Println("Listen: ", r)
+		go func() {
+			defer conn.Close()
 
-	select {}
+			fp, err := os.Create("mpegts.ts")
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			buff := make([]byte, 2048)
+			for {
+				if n, err := conn.Read(buff); err != nil {
+					log.Println(err)
+					return
+				} else {
+					_, _ = fp.Write(buff[:n])
+				}
+			}
+		}()
+	}
 
 }

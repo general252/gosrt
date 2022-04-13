@@ -2,7 +2,6 @@
 
 #include "gosrt.h"
 #include "srt/srt.h"
-#include <thread>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "srt.lib")
@@ -10,15 +9,18 @@
 #endif
 
 
-int do_epoll(int epoll_fd, int listen_fd);
 int handle_events(int epoll_fd, SRT_EPOLL_EVENT* events, int num, int listen_fd);
 int handle_accpet(int epoll_fd, int listen_fd);
 
-int do_read(int epoll_fd, int fd);
+int do_read(int listen_fd, int epoll_fd, int fd);
 
 int add_event(int epoll_fd, int fd, int events);
 int mod_event(int epoll_fd, int fd, int events);
 int del_event(int epoll_fd, int fd);
+
+
+const int EPOLL_EVENTS = 100;
+const int MAX_SIZE = 2048;
 
 
 func_new_connection_callback m_conn_cb;
@@ -26,17 +28,21 @@ func_data_read_callback m_data_cb;
 func_close_callback m_close_cb;
 func_error_callback m_err_cb;
 
-GOSRT_API int32_t gosrt_init(
+GOSRT_API int32_t gosrt_startup(
     func_new_connection_callback conn_cb,
-    func_data_read_callback data_cb)
+    func_data_read_callback data_cb,
+    func_close_callback close_cb)
 {
     m_conn_cb = conn_cb;
     m_data_cb = data_cb;
+    m_close_cb = close_cb;
+
+    srt_setloglevel(LOG_INFO);
 
     return srt_startup();
 }
 
-GOSRT_API int32_t gosrt_deinit()
+GOSRT_API int32_t gosrt_cleanup()
 {
     return srt_cleanup();
 }
@@ -60,73 +66,62 @@ GOSRT_API int32_t gosrt_listen(int32_t port)
     // bind
     if (SRT_ERROR == srt_bind(listen_fd, (struct sockaddr*)&server_addr, sizeof(sockaddr_in))) {
         printf("bind error\n");
+        srt_close(listen_fd);
         return -2;
     }
 
     // listen
-    srt_listen(listen_fd, 50);
+    if (SRT_ERROR == srt_listen(listen_fd, 50)) {
+        printf("listen error\n");
+        srt_close(listen_fd);
+        return -3;
+    }
 
+    return listen_fd;
+}
 
+GOSRT_API int32_t gosrt_close(int32_t listen_fd)
+{
+    return srt_close(listen_fd);
+}
+
+GOSRT_API int32_t gosrt_epoll_create(int32_t listen_fd)
+{
     // 创建一个文件描述符
     int epoll_fd = srt_epoll_create();
 
-    std::thread writeThread([epoll_fd, listen_fd]()
-        {
-            // poll
-            do_epoll(epoll_fd, listen_fd);
-
-            srt_epoll_release(epoll_fd);
-        });
-
-    writeThread.detach();
-
-    return epoll_fd;
-}
-
-
-
-
-
-const char* IPADDRESS = "0.0.0.0";
-const int PORT = 8787;
-const int MAX_SIZE = 2048;
-const int LISTEN_Q = 5;
-const int FD_SIZE = 1000;
-const int EPOLL_EVENTS = 100;
-
-
-
-// 1. poll
-int do_epoll(int epoll_fd, int listen_fd)
-{
-    SRT_EPOLL_EVENT events[EPOLL_EVENTS];
-    int num = EPOLL_EVENTS;
-
-    int ret = -1;
 
     // 添加监听描述符事件
     add_event(epoll_fd, listen_fd, SRT_EPOLL_IN | SRT_EPOLL_ERR | SRT_EPOLL_ACCEPT);
 
-    while (true)
-    {
-        ret = srt_epoll_uwait(epoll_fd, &events[0], num, 5);
-        if (ret > 0) {
-            handle_events(epoll_fd, events, ret, listen_fd);
-        }
-        else if (SRT_ERROR == ret) {
-            break;
-        }
-    }
 
-
-    return 0;
+    return epoll_fd;
 }
 
-// 2. event
+GOSRT_API int32_t gosrt_epoll_uwait(int32_t listen_fd, int32_t epoll_fd)
+{
+    SRT_EPOLL_EVENT events[EPOLL_EVENTS];
+    int num = EPOLL_EVENTS;
+
+    int ret = srt_epoll_uwait(epoll_fd, &events[0], num, 0);
+    if (ret > 0) {
+        handle_events(epoll_fd, events, ret, listen_fd);
+    }
+
+    return ret;
+}
+
+GOSRT_API int32_t gosrt_epoll_release(int32_t epoll_fd)
+{
+    return srt_epoll_release(epoll_fd);
+}
+
+
+
+
 int handle_events(int epoll_fd, SRT_EPOLL_EVENT* events, int num, int listen_fd)
 {
-    int i;
-    for (i = 0; i < num; i++)
+    for (int i = 0; i < num; i++)
     {
         SRT_EPOLL_EVENT s = events[i];
 
@@ -137,11 +132,10 @@ int handle_events(int epoll_fd, SRT_EPOLL_EVENT* events, int num, int listen_fd)
         }
         else if (s.events & SRT_EPOLL_IN)
         {
-            do_read(epoll_fd, s.fd);
+            do_read(listen_fd, epoll_fd, s.fd);
         }
         else if (s.events & SRT_EPOLL_OUT)
         {
-            // printf("[event] write fd: %d\n", s.fd);
             //do_write(epoll_fd, s.fd, buf);
 
             //mod_event(epoll_fd, s.fd, SRT_EPOLL_IN | SRT_EPOLL_ERR);
@@ -159,7 +153,6 @@ int handle_events(int epoll_fd, SRT_EPOLL_EVENT* events, int num, int listen_fd)
     return 0;
 }
 
-// 3. accept
 int handle_accpet(int epoll_fd, int listen_fd)
 {
     SRTSOCKET cli_fd;
@@ -194,38 +187,26 @@ int handle_accpet(int epoll_fd, int listen_fd)
 
         // 通知
         if (m_conn_cb) {
-            m_conn_cb(epoll_fd, cli_fd, (uint8_t*)sid, (int32_t)strlen(sid));
+            m_conn_cb(listen_fd, epoll_fd, cli_fd, (uint8_t*)sid, (int32_t)strlen(sid));
         }
 
-#if 0
-        std::thread writeThread([epoll_fd, cli_fd]()
-            {
-                char buffer[64];
-                for (int i = 0; i < 10000; i++)
-                {
-                    sprintf(buffer, "hello world %d", i);
-                    int rc = srt_sendmsg(cli_fd, buffer, strlen(buffer) + 1, -1, false);
-                    printf("srt_sendmsg %d. %s\n", rc, buffer);
-                    if (SRT_ERROR == rc) {
-                        printf("send fail. %s\n", srt_getlasterror_str());
-                        del_event(epoll_fd, cli_fd);
-                        srt_close(cli_fd);
-                        break;
-                    }
 
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                }
-            });
+        if (false) {
+            char buffer[64];
+            sprintf(buffer, "hello world %d", 123);
+            if (SRT_ERROR == srt_sendmsg(cli_fd, buffer, strlen(buffer) + 1, -1, false)) {
+                printf("send fail. %s\n", srt_getlasterror_str());
+                del_event(epoll_fd, cli_fd);
+                srt_close(cli_fd);
+            }
+        }
 
-        writeThread.detach();
-#endif
     }
 
     return 0;
 }
 
-// 4. read
-int do_read(int epoll_fd, int fd)
+int do_read(int listen_fd, int epoll_fd, int fd)
 {
     char buf[MAX_SIZE] = { 0 };
     int nread = srt_recvmsg(fd, buf, MAX_SIZE);
@@ -236,10 +217,10 @@ int do_read(int epoll_fd, int fd)
         printf("read error. %s\n", err); //	(-1) when an error occurs
 
         if (m_err_cb) {
-            m_err_cb(epoll_fd, fd, (uint8_t*)err, (int32_t)strlen(err));
+            m_err_cb(listen_fd, epoll_fd, fd, (uint8_t*)err, (int32_t)strlen(err));
         }
         if (m_close_cb) {
-            m_close_cb(epoll_fd, fd);
+            m_close_cb(listen_fd, epoll_fd, fd);
         }
 
         del_event(epoll_fd, fd);
@@ -267,7 +248,7 @@ int do_read(int epoll_fd, int fd)
 #endif
 
         if (m_data_cb) {
-            m_data_cb(epoll_fd, fd, (uint8_t*)sid, (int32_t)strlen(sid), (uint8_t*)buf, nread);
+            m_data_cb(listen_fd, epoll_fd, fd, (uint8_t*)sid, (int32_t)strlen(sid), (uint8_t*)buf, nread);
             //printf("ss %d %d\n", nread, (int32_t)strlen(sid));
         }
     }
