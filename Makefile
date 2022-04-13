@@ -1,7 +1,7 @@
 
 
 all:
-	go build -o bin/gst.exe main.go
+	go build -o bin/gosrt.exe main.go
 
 run:
-	./bin/gst.exe
+	./bin/gosrt.exe
