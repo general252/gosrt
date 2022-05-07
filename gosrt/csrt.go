@@ -13,6 +13,7 @@ void OnDataReadCallback(int64_t listen_fd, int64_t epoll_fd, int64_t fd_cli, uin
 */
 import "C"
 import (
+	"reflect"
 	"unsafe"
 )
 
@@ -79,6 +80,13 @@ func SrtListen(port int) int {
 
 func SrtClose(listenFd int) {
 	C.gosrt_close(C.int32_t(listenFd))
+}
+
+func SrtSend(cliFd int, buf []byte) int {
+	data := (*C.uint8_t)(unsafe.Pointer((*reflect.StringHeader)(unsafe.Pointer(&buf)).Data))
+	var r = C.gosrt_send(C.int32_t(cliFd), data, C.int32_t(len(buf)))
+
+	return int(r)
 }
 
 func SrtEpollCreate(listenFd int) int {

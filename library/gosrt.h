@@ -34,6 +34,7 @@ extern "C" {
 
     GOSRT_API int32_t gosrt_listen(int32_t port);
     GOSRT_API int32_t gosrt_close(int32_t listen_fd);
+    GOSRT_API int32_t gosrt_send(int32_t fd_cli, uint8_t* buf, int32_t buf_size);
 
     GOSRT_API int32_t gosrt_epoll_create(int32_t listen_fd);
     GOSRT_API int32_t gosrt_epoll_uwait(int32_t listen_fd, int32_t epoll_fd);

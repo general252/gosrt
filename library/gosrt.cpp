@@ -85,6 +85,11 @@ GOSRT_API int32_t gosrt_close(int32_t listen_fd)
     return srt_close(listen_fd);
 }
 
+GOSRT_API int32_t gosrt_send(int32_t fd_cli, uint8_t* buf, int32_t buf_size)
+{
+    return srt_send(fd_cli, (const char*)buf, buf_size);
+}
+
 GOSRT_API int32_t gosrt_epoll_create(int32_t listen_fd)
 {
     // 创建一个文件描述符

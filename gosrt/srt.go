@@ -26,7 +26,7 @@ func Listen(port int) (*SRTListener, error) {
 		return nil, fmt.Errorf("srt epoll create failed: %v", epollFd)
 	}
 
-	c := NewSRTListener(listenFd, epollFd)
+	c := NewSRTListener(listenFd, epollFd, port)
 
 	srtEventHandler.addSRTListener(c)
 
@@ -62,8 +62,6 @@ func (c *mySRTEventHandleImpl) OnConnectionClose(listenFd int, epollFd int, cliF
 	}
 }
 func (c *mySRTEventHandleImpl) OnDataRead(listenFd int, epollFd int, cliFd int, sid string, data []byte) {
-	log.Println("on data read ", sid, len(data))
-
 	o, ok := c.srtListenerList.Load(listenFd)
 	if ok {
 		o.(*SRTListener).onDataRead(cliFd, sid, data)

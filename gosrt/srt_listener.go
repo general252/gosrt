@@ -7,6 +7,7 @@ import (
 )
 
 type SRTListener struct {
+	port     int
 	listenFd int
 	epollFd  int
 
@@ -14,8 +15,9 @@ type SRTListener struct {
 	connList sync.Map
 }
 
-func NewSRTListener(listenFd int, epollFd int) *SRTListener {
+func NewSRTListener(listenFd int, epollFd int, port int) *SRTListener {
 	c := &SRTListener{
+		port:     port,
 		listenFd: listenFd,
 		epollFd:  epollFd,
 		chAccept: make(chan *SRTConn, 10),
@@ -56,7 +58,9 @@ func (c *SRTListener) Close() error {
 
 // Addr returns the listener's network address.
 func (c *SRTListener) Addr() net.Addr {
-	return &net.UDPAddr{}
+	return &net.UDPAddr{
+		Port: c.port,
+	}
 }
 
 func (c *SRTListener) onConnectionAccept(fd int, sid string) {
